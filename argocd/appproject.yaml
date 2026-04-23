@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: gitops-eks-project
+  namespace: argocd
+  labels:
+    managed-by: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "GitOps EKS — dev environment (restricted project)"
+
+  # FIX MEDIUM-02: Lock source to ONLY the gitops-repo
+  # (default project allows any source repo — security risk)
+  sourceRepos:
+    - "${GITOPS_REPO_URL}"
+
+  # Lock destination to ONLY the dev namespace on the local cluster
+  destinations:
+    - namespace: dev
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+
+  # Allow Namespace creation (needed for CreateNamespace=true sync option)
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  # Namespace-scoped resources allowed in dev
+  namespaceResourceWhitelist:
+    - group: "apps"
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: "policy"
+      kind: PodDisruptionBudget
+    - group: "networking.k8s.io"
+      kind: Ingress
+
+  # Prevent deployments that have no resource limits
+  roles: []

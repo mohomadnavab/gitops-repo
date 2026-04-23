@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp
+  namespace: argocd
+  labels:
+    app: myapp
+    environment: dev
+    managed-by: argocd
+  # Cascade-delete: removing this Application also removes its deployed resources
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # FIX MEDIUM-02: Use dedicated project instead of insecure 'default' project
+  project: gitops-eks-project
+
+  source:
+    # FIX CRITICAL-04: ${GITOPS_REPO_URL} is substituted by deploy.sh using envsubst
+    # Original had a literal <YOUR_GITHUB_ORG> placeholder — ArgoCD would immediately error
+    repoURL:        "${GITOPS_REPO_URL}"
+    targetRevision: main
+    path:           apps/myapp
+
+  destination:
+    server:    https://kubernetes.default.svc
+    namespace: dev
+
+  syncPolicy:
+    automated:
+      prune:     true   # Remove resources deleted from Git
+      selfHeal:  true   # Revert any manual cluster changes back to Git state
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration:    5s
+        factor:      2
+        maxDuration: 3m
+
+  # Keep 10 history entries — supports Git-based rollback
+  revisionHistoryLimit: 10

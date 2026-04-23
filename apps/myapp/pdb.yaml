@@ -1,0 +1,16 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: myapp-pdb
+  namespace: dev
+  labels:
+    app: myapp
+    managed-by: argocd
+spec:
+  # FIX HIGH-05: Guarantees at least 1 pod stays running during node drains
+  # (cluster upgrades, node replacements, voluntary disruptions)
+  # Without this, Kubernetes can terminate BOTH pods simultaneously → downtime
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: myapp

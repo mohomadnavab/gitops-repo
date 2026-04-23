@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: myapp
+    app.kubernetes.io/version: unknown
+    app: myapp
+    managed-by: argocd
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: myapp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: myapp
+        app.kubernetes.io/name: myapp
+    spec:
+      # Security context — non-root user
+      securityContext:
+        runAsNonRoot: true
+        runAsUser:  1000
+        runAsGroup: 1000
+        fsGroup:    1000
+
+      containers:
+        - name: myapp
+          # ──────────────────────────────────────────────────────────────────
+          # IMAGE TAG IS AUTOMATICALLY UPDATED BY THE CI PIPELINE
+          # Format: <ecr_registry>/<repo_name>:sha-<git_commit_sha>
+          # ──────────────────────────────────────────────────────────────────
+          image: PLACEHOLDER_IMAGE:PLACEHOLDER_TAG
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          # FIX CRITICAL-03: Replaced invalid fieldRef metadata.labels['app']
+          # (unsupported Downward API field) with a direct static value.
+          # APP_VERSION is the image tag injected by CI via the image line.
+          env:
+            - name: APP_VERSION
+              value: "unknown"   # Updated by CI alongside the image tag
+
+          resources:
+            requests:
+              cpu:    "100m"
+              memory: "128Mi"
+            limits:
+              cpu:    "500m"
+              memory: "256Mi"
+
+          # FIX MEDIUM-03: startupProbe separates startup time from health checks
+          # Prevents liveness from killing slow-starting containers
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30   # 30 × 5s = 150 s max startup window
+            periodSeconds:    5
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 0   # startupProbe guards startup — no delay needed
+            periodSeconds:       15
+            failureThreshold:    3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds:       10
+            failureThreshold:    3
+
+          # FIX CRITICAL-02: readOnlyRootFilesystem=true requires emptyDir for /tmp
+          # Without this, gunicorn crashes immediately (PID/socket files need /tmp)
+          volumeMounts:
+            - name: tmp-dir
+              mountPath: /tmp
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities:
+              drop:
+                - ALL
+
+      # FIX CRITICAL-02: emptyDir volume provides writable /tmp for gunicorn
+      volumes:
+        - name: tmp-dir
+          emptyDir: {}
+
+      # FIX HIGH-06: Changed DoNotSchedule → ScheduleAnyway
+      # DoNotSchedule with maxSurge=1 on 2-node cluster causes rolling updates to DEADLOCK
+      topologySpreadConstraints:
+        - maxSkew:            1
+          topologyKey:        kubernetes.io/hostname
+          whenUnsatisfiable:  ScheduleAnyway   # FIX: was DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: myapp
